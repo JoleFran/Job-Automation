@@ -12,7 +12,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py .
 COPY generate_resume.py .
 
-RUN mkdir -p /app/base_resumes /app/outputs
+# Copy base resume templates from repo into image
+COPY base_resumes/ /app/base_resumes/
+
+RUN mkdir -p /app/outputs
 
 EXPOSE 8000
 
