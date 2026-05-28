@@ -25,10 +25,4 @@ RUN mkdir -p /app/templates /app/outputs
 EXPOSE 8000
 
 # Use Gunicorn for production; 1 worker because LibreOffice is not thread-safe for PDF export
-CMD gunicorn app:app \
-    --bind 0.0.0.0:${PORT:-8000} \
-    --workers 1 \
-    --threads 4 \
-    --timeout 120 \
-    --access-logfile - \
-    --error-logfile -
+CMD ["/bin/sh", "-c", "gunicorn app:app --bind 0.0.0.0:${PORT:-8000} --workers 1 --threads 4 --timeout 120 --access-logfile - --error-logfile -"]
