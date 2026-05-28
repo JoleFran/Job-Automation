@@ -1,77 +1,19 @@
 #!/usr/bin/env python3
 """
-generate_resume.py — Resume document generation script
-Joe Frank Job Search Pipeline
-
-Usage:
-    python3 generate_resume.py --template <path_to_template.docx> \
-                               --bullets <path_to_bullets.json> \
-                               --output <path_to_output.docx> \
-                               [--pdf]
-
-Arguments:
-    --template   Path to the master .docx template file for the selected resume version
-    --bullets    Path to JSON file containing the rewriter output bullets array
-    --output     Path for the generated .docx output file
-    --pdf        Optional flag: also export a .pdf alongside the .docx
-
-Input JSON format (bullets array from Rewriter prompt output):
-[
-  {
-    "role": "Platform Services Product Manager",
-    "bullet_number": 1,
-    "changed": false,
-    "before": "Original bullet text...",
-    "after": null
-  },
-  {
-    "role": "Platform Services Product Manager",
-    "bullet_number": 2,
-    "changed": true,
-    "before": "Original bullet text...",
-    "after": "Rewritten bullet text..."
-  }
-]
-
-How it works:
-    1. Unpacks the template .docx to a temp directory
-    2. Reads document.xml and replaces bullet text for changed bullets
-    3. Repacks to a new .docx file
-    4. Optionally converts to PDF via LibreOffice
-    5. Writes a changelog to stdout as JSON
-
-Rules enforced:
-    - Only replaces bullet text that matches the "before" string exactly
-    - Never touches the header (floating drawing group)
-    - Never modifies unchanged bullets
-    - Reports any bullet where the "before" text was not found
-    - Rejects output containing em dashes
+generate_resume.py — Resume document generation script (self-contained, no external scripts)
+Joe Frank Job Search Pipeline — Railway deployment
 """
 
 import argparse
 import json
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
+import zipfile
 from pathlib import Path
 
-SCRIPTS_DIR = Path("/mnt/skills/public/docx/scripts/office")
-UNPACK_SCRIPT = SCRIPTS_DIR / "unpack.py"
-PACK_SCRIPT = SCRIPTS_DIR / "pack.py"
-SOFFICE_SCRIPT = SCRIPTS_DIR / "soffice.py"
-
 EM_DASH = "\u2014"
-
-
-def run(cmd, check=True):
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if check and result.returncode != 0:
-        print(f"ERROR running {' '.join(str(c) for c in cmd)}", file=sys.stderr)
-        print(result.stderr, file=sys.stderr)
-        sys.exit(1)
-    return result
 
 
 def validate_inputs(template_path, bullets_path):
@@ -103,15 +45,36 @@ def check_em_dashes(bullets):
     return violations
 
 
+def unpack_docx(docx_path, unpack_dir):
+    """Unzip the .docx into unpack_dir."""
+    with zipfile.ZipFile(docx_path, 'r') as z:
+        z.extractall(unpack_dir)
+
+
+def pack_docx(unpack_dir, output_path, original_docx):
+    """
+    Repack unpack_dir into a .docx at output_path.
+    Preserves the original zip structure and compression.
+    """
+    output_path = str(output_path)
+    # Read original zip to preserve compression types per-member
+    original_members = {}
+    with zipfile.ZipFile(original_docx, 'r') as orig:
+        for info in orig.infolist():
+            original_members[info.filename] = info.compress_type
+
+    with zipfile.ZipFile(output_path, 'w') as zout:
+        for root, dirs, files in os.walk(unpack_dir):
+            for file in files:
+                file_path = os.path.join(root, file)
+                arcname = os.path.relpath(file_path, unpack_dir)
+                compress = original_members.get(arcname, zipfile.ZIP_DEFLATED)
+                zout.write(file_path, arcname, compress_type=compress)
+
+
 def replace_bullets(doc_xml, bullets):
-    """
-    Perform surgical text replacement for each changed bullet.
-    Matches on the full 'before' text string and replaces with 'after'.
-    Returns (modified_xml, changelog).
-    """
     changelog = []
     content = doc_xml
-
     changed_bullets = [b for b in bullets if b.get("changed") and b.get("after")]
 
     for bullet in changed_bullets:
@@ -128,12 +91,11 @@ def replace_bullets(doc_xml, bullets):
                 "after_snippet": after_text[:80] + ("..." if len(after_text) > 80 else "")
             })
         else:
-            # Before text not found — may be already modified or mismatch
             changelog.append({
                 "role": bullet["role"],
                 "bullet_number": bullet["bullet_number"],
                 "status": "not_found",
-                "note": "Original text not found in document. Template may be out of sync with bullet data.",
+                "note": "Original text not found in document. Template may be out of sync.",
                 "before_snippet": before_text[:80] + ("..." if len(before_text) > 80 else "")
             })
 
@@ -143,50 +105,53 @@ def replace_bullets(doc_xml, bullets):
 def generate(template_path, bullets_path, output_path, export_pdf=False):
     bullets = validate_inputs(template_path, bullets_path)
 
-    # Em dash check before touching any files
     em_violations = check_em_dashes(bullets)
     if em_violations:
         print(json.dumps({
             "status": "error",
             "error": "em_dash_violation",
-            "message": "Rewritten bullets contain em dashes. Correct before generating document.",
+            "message": "Rewritten bullets contain em dashes.",
             "violations": em_violations
         }, indent=2))
         sys.exit(1)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         unpack_dir = os.path.join(tmp_dir, "unpacked")
+        os.makedirs(unpack_dir)
 
-        # Step 1: Unpack template
-        run(["python3", str(UNPACK_SCRIPT), template_path, unpack_dir])
+        # Unpack
+        unpack_docx(template_path, unpack_dir)
 
-        # Step 2: Read document.xml
+        # Read document.xml
         doc_xml_path = os.path.join(unpack_dir, "word", "document.xml")
         with open(doc_xml_path, "r", encoding="utf-8") as f:
             doc_xml = f.read()
 
-        # Step 3: Replace bullet text
+        # Replace bullets
         modified_xml, changelog = replace_bullets(doc_xml, bullets)
 
-        # Step 4: Write modified document.xml
+        # Write modified document.xml
         with open(doc_xml_path, "w", encoding="utf-8") as f:
             f.write(modified_xml)
 
-        # Step 5: Repack to output .docx
-        run(["python3", str(PACK_SCRIPT), unpack_dir, output_path,
-             "--original", template_path])
+        # Repack
+        pack_docx(unpack_dir, output_path, template_path)
 
-        # Step 6: Optional PDF export
+        # Optional PDF export via LibreOffice
         pdf_path = None
         if export_pdf:
+            import subprocess
             output_dir = str(Path(output_path).parent)
-            run(["python3", str(SOFFICE_SCRIPT), "--headless",
-                 "--convert-to", "pdf", "--outdir", output_dir, output_path])
-            pdf_path = str(Path(output_path).with_suffix(".pdf"))
+            result = subprocess.run(
+                ["libreoffice", "--headless", "--convert-to", "pdf",
+                 "--outdir", output_dir, str(output_path)],
+                capture_output=True, text=True
+            )
+            if result.returncode == 0:
+                pdf_path = str(Path(output_path).with_suffix(".pdf"))
 
-        # Step 7: Report
         not_found = [c for c in changelog if c["status"] == "not_found"]
-        replaced = [c for c in changelog if c["status"] == "replaced"]
+        replaced  = [c for c in changelog if c["status"] == "replaced"]
 
         result = {
             "status": "success",
@@ -199,8 +164,7 @@ def generate(template_path, bullets_path, output_path, export_pdf=False):
 
         if not_found:
             result["warnings"] = [
-                f"Bullet {c['bullet_number']} in '{c['role']}' not found in template. "
-                f"Manual review required."
+                f"Bullet {c['bullet_number']} in '{c['role']}' not found in template."
                 for c in not_found
             ]
 
@@ -208,25 +172,13 @@ def generate(template_path, bullets_path, output_path, export_pdf=False):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Generate optimized resume .docx from template and rewriter output"
-    )
-    parser.add_argument("--template", required=True,
-                        help="Path to master .docx template file")
-    parser.add_argument("--bullets", required=True,
-                        help="Path to JSON file with rewriter bullets array")
-    parser.add_argument("--output", required=True,
-                        help="Output path for generated .docx")
-    parser.add_argument("--pdf", action="store_true",
-                        help="Also export PDF alongside .docx")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--template", required=True)
+    parser.add_argument("--bullets",  required=True)
+    parser.add_argument("--output",   required=True)
+    parser.add_argument("--pdf", action="store_true")
     args = parser.parse_args()
-
-    generate(
-        template_path=args.template,
-        bullets_path=args.bullets,
-        output_path=args.output,
-        export_pdf=args.pdf
-    )
+    generate(args.template, args.bullets, args.output, args.pdf)
 
 
 if __name__ == "__main__":
