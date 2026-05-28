@@ -93,7 +93,9 @@ def generate():
     logging.warning(f"DEBUG body type: {type(body)}, body: {str(body)[:200]}")
     if isinstance(body, str):
         try:
-            body = json.loads(body)
+            # Strip leading = that n8n sometimes prepends to expressions
+            cleaned = body.lstrip('=').strip()
+            body = json.loads(cleaned)
         except json.JSONDecodeError:
             body = None
     if not body:
