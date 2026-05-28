@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py .
 COPY generate_resume.py .
 
-RUN mkdir -p /app/templates /app/outputs
+RUN mkdir -p /app/base_resumes /app/outputs
 
 EXPOSE 8000
 
