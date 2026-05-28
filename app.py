@@ -87,6 +87,11 @@ def generate():
     check_auth()
 
     body = request.get_json(force=True, silent=True)
+    if isinstance(body, str):
+        try:
+            body = json.loads(body)
+        except json.JSONDecodeError:
+            body = None
     if not body:
         return jsonify({"status": "error", "message": "Request body must be JSON"}), 400
 
