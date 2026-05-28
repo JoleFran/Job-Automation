@@ -86,7 +86,11 @@ def list_templates():
 def generate():
     check_auth()
 
+    import logging
+    logging.warning(f"DEBUG content_type: {request.content_type}")
+    logging.warning(f"DEBUG raw_data: {request.data[:500]}")
     body = request.get_json(force=True, silent=True)
+    logging.warning(f"DEBUG body type: {type(body)}, body: {str(body)[:200]}")
     if isinstance(body, str):
         try:
             body = json.loads(body)
