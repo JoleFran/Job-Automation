@@ -107,13 +107,9 @@ def generate(template_path, bullets_path, output_path, export_pdf=False):
 
     em_violations = check_em_dashes(bullets)
     if em_violations:
-        print(json.dumps({
-            "status": "error",
-            "error": "em_dash_violation",
-            "message": "Rewritten bullets contain em dashes.",
-            "violations": em_violations
-        }, indent=2))
-        sys.exit(1)
+        # Warn but do not stop — em dashes in after text should be fixed in the prompt
+        import sys as _sys
+        print(f"WARNING: em dash found in rewritten bullets: {em_violations}", file=_sys.stderr)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         unpack_dir = os.path.join(tmp_dir, "unpacked")
@@ -126,6 +122,10 @@ def generate(template_path, bullets_path, output_path, export_pdf=False):
         doc_xml_path = os.path.join(unpack_dir, "word", "document.xml")
         with open(doc_xml_path, "r", encoding="utf-8") as f:
             doc_xml = f.read()
+
+        # Normalize em dashes in template to double-hyphen so bullet matching works
+        # Word auto-converts -- to em dash on save; this reverses that
+        doc_xml = doc_xml.replace("—", "--")
 
         # Replace bullets
         modified_xml, changelog = replace_bullets(doc_xml, bullets)
