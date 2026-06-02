@@ -100,7 +100,7 @@ def generate():
     # ── Validate required fields ──────────────────────────────────────────────
     template_name = body.get("template")
     bullets       = body.get("bullets")
-    job_id        = body.get("job_id", "job")
+    job_id        = body.get("resume_filename", body.get("job_id", "job"))
     export_pdf    = body.get("pdf", True)
 
     if not template_name:
